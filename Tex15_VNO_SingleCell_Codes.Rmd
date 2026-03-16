@@ -1,0 +1,587 @@
+---
+title: "Tex15_VNO_SingleCell_Codes"
+output: html_document
+---
+
+#List of Libraries
+```{r libraries, message = TRUE}
+library(tidyverse)
+library(Seurat)
+library(dplyr)
+library(monocle3)
+library(cowplot)
+library(RColorBrewer)
+library(scales)
+library(patchwork)
+library(patchwork)
+library(SeuratObject)
+library(SeuratWrappers)
+Csparse_validate = "CsparseMatrix_validate"
+
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 2)
+```
+#Reading and Processing Data
+
+##Reading and Saving Seurat Objects
+```{r, eval=FALSE}
+
+
+
+#scRNA data was downloaded from:  
+
+#GSM8000370_p14f1_raw_counts.txt.gz
+#GSM8000371_p14f2_raw_counts.txt.gz
+#GSM8000372_p14m1_raw_counts.txt.gz
+#GSM8000373_p14m2_raw_counts.txt.gz
+
+#Creating Seurat Objects
+F114obj<- CreateSeuratObject(counts = Counts_F114.data, project = "Ron_Yu_DataF114", min.cells = 3, min.features = 200)
+F214obj<- CreateSeuratObject(counts = Counts_F214.data, project = "Ron_Yu_DataF214", min.cells = 3, min.features = 200)
+M114obj<- CreateSeuratObject(counts = Counts_M114.data, project = "Ron_Yu_DataM114", min.cells = 3, min.features = 200)
+M214obj<- CreateSeuratObject(counts = Counts_M214.data, project = "Ron_Yu_DataM214", min.cells = 3, min.features = 200)
+
+#Saving Seurat Objects
+saveRDS(F114obj, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/F114obj_processed")
+saveRDS(F214obj, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/F214obj_processed")
+saveRDS(M114obj, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/M114obj_processed")
+saveRDS(M214obj, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/M214obj_processed")
+
+```
+
+##Reading Seurat Objects
+```{r}
+F114.data_read <- readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/F114obj_processed")
+F214.data_read <- readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/F214obj_processed")
+M114.data_read <- readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/M114obj_processed")
+M214.data_read <- readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/M214obj_processed")
+```
+
+##assigning meta data
+```{r}
+
+
+F114.data_read$sex <- "F"
+F214.data_read$sex <- "F"
+M114.data_read$sex <- "M"
+M214.data_read$sex <- "M"
+
+F114.data_read$replicate <-"r1.14"
+F214.data_read$replicate <-"r2.14"
+M114.data_read$replicate <-"r3.14"
+M214.data_read$replicate <-"r4.14"
+
+
+```
+##cleaning up the data
+```{r}
+
+obj.all <-merge(F114.data_read, y = c(F214.data_read,M114.data_read,M214.data_read), project = "RonYu")
+
+obj.all[["percent.mito"]] <- PercentageFeatureSet(obj.all, pattern = "^mt-")
+VlnPlot(obj.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3)+theme_bw()
+
+obj <- obj.all %>% subset(percent.mito < 10 & nFeature_RNA > 1000 & nFeature_RNA < 7000 & nCount_RNA > 2000 & nCount_RNA < 80000)
+
+```
+##removing obj all to clear RAM load
+```{r, message=FALSE}
+
+rm(F114obj,F214obj,M114obj,M214obj)
+rm(F114.data_read,F214.data_read,M114.data_read,M214.data_read)
+rm(F1.data,M1.data,F2.data,M2.data)
+rm(F1,F2,M1,M2)
+rm(D.F1,D.F2,D.M1,D.M2)
+rm(D.F1.data,D.M1.data,D.F2.data,D.M2.data,Counts_F114.data,Counts_F214.data,Counts_M114.data,Counts_M214.data)
+rm(D.F1_read,D.F1.data_read, D.F2_read,D.F2.data_read,D.M1_read,D.M1.data_read,D.M2_read,D.M2.data_read,F1_read,F1.data_read,F2_read,F2.data_read,M1_read,M1.data_read,M2_read,M2.data_read)
+rm(V.F1.data,V.M1.data,V.F2.data,V.F1,V.F2,V.M1,V.F1.data_read,V.F1_read,V.F2_read,V.F2.data_read,V.M1_read,V.M1.data_read)
+rm(obj.all)
+gc()
+
+```
+
+## Analyze each library separately
+```{r}
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj)
+```
+## finding neighbours
+```{r}
+obj <- FindNeighbors(obj, dims = 1:30, reduction = "pca")
+obj <- FindClusters(obj, resolution = 2, cluster.name = "unintegrated_clusters")
+```
+##running the umap
+```{r}
+obj <- RunUMAP(obj, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+DimPlot(obj, reduction = "umap.unintegrated", group.by = c("orig.ident"),shuffle=TRUE)
+```
+
+##Save analyzed libraries
+```{r}
+saveRDS(obj, file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/Unintegrated_Seurat_Object.rData")
+
+```
+
+## Integrate libraries and rerun analysis
+```{r}
+
+obj<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/Unintegrated_Seurat_Object.rData")
+
+IntObj <- IntegrateLayers(
+  object = obj, method = CCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.cca",
+  verbose = FALSE
+)
+
+rm(obj)
+gc()
+
+```
+##looking for clusters
+```{r}
+IntObj <- FindNeighbors(IntObj, reduction = "integrated.cca", dims = 1:30)
+IntObj <- FindClusters(IntObj, resolution = 4, cluster.name = "cca_clusters")
+```
+##making integrated umap
+```{r}
+IntObj <- RunUMAP(IntObj, reduction = "integrated.cca", dims = 1:30)
+```
+##Save analyzed libraries
+```{r}
+saveRDS(IntObj, file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/Integrated_Seurat_Object.rData")
+```
+
+# Visualize integrated data
+```{r}
+
+
+DimPlot(
+  IntObj,
+  reduction = "umap",
+  group.by = c("cca_clusters"), label= TRUE,
+  label.size = 2) + theme(aspect.ratio=1)
+
+DimPlot(
+  IntObj,
+  reduction = "umap"
+  , label= TRUE,
+  label.size = 2) + theme(aspect.ratio=1)
+
+```
+#Generating Supplemental Figure 1
+```{r}
+
+#Naming all clusters based off of expression profile data from Hills Jr, et. al.
+
+Cluster_names_all <- c("45"="GBC",
+                   "40"="INP",
+                   "50"="iVSN V1R",
+                   "54"="iVSN V1R",
+                   "25"="iVSN V1R",
+                   "15"="iVSN V1R",
+                   "29"="iVSN V2R",
+                   "24"="iVSN V2R",
+                   "11"="iVSN V2R",
+                   "46"="iOSN",
+                   "9"="mVSN V2R",
+                   "16"="mVSN V2R",
+                   "43"="mVSN V2R",
+                   "31"="mVSN V2R",
+                   "26"="mVSN V2R",
+                   "37"="mVSN V2R",
+                   "5"="mVSN V2R",
+                   "35"="mVSN V2R",
+                   "19"="mVSN V2R",
+                   "1"="mVSN V2R",
+                   "8"="mVSN V1R",
+                   "0"="mVSN V1R",
+                   "53"="mVSN V1R",
+                   "10"="mVSN V1R",
+                   "2"="mVSN V1R",
+                   "44"="mVSN V1R",
+                   "3"="mVSN V1R",
+                   "8"="mVSN V1R",
+                   "18"="mVSN V1R",
+                   "60"="mVSN V1R",
+                   "17"="mVSN V1R",
+                   "39"="mVSN V1R",
+                   "4"="mVSN V1R",
+                   "6"="mVSN V1R",
+                   "8"="mVSN V1R",
+                   "14"="mVSN V1R",
+                   "52"="mOSN",
+                   "27"="SUS",
+                   "33"="SUS",
+                   "42"="T-Cells",
+                   "34"="LP",
+                   "23"="LP",
+                   "28"="LP",
+                   "49"="LP",
+                   "59"="LP",
+                   "48"="LP",
+                   "55"="HBC",
+                   "36"="HBC",
+                   "51"="HBC",
+                   "57"="HBC",
+                   "56"="MV",
+                   "47"="OEC",
+                   "20"="Immune FPRs",
+                   "7"="Immune FPRs",
+                   "22"="Immune FPRs",
+                   "38"="Microgila rp",
+                   "61"="Microgila rp",
+                   "12"="Microgila",
+                   "41"="Microgila",
+                   "30"="MV",
+                   "58"="MV",
+                   "13"="Unknown population",
+                   "21"="Unknown population",
+                   "32"="Unknown population")
+
+#adding cluster names to Object
+IntObj<- RenameIdents(IntObj, Cluster_names_all)
+
+#Figure S1C
+Dotplot_mainplot<-DotPlot(IntObj, features = c("Tex15","Ascl1","Neurod1","Gap43","Gnai2","Gnao1","Omp"))
+
+#Figure S1A
+mainplot<-DimPlot(
+  IntObj,
+  reduction = "umap", label= TRUE,
+  label.size = 2) + theme(aspect.ratio=1)
+
+#Figure S1B
+Ascl1_mainplot<-FeaturePlot(IntObj,features=c("Ascl1"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(6,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1B
+Neurod1_mainplot<-FeaturePlot(IntObj,features=c("Neurod1"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(6,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1B
+Gap43_mainplot<-FeaturePlot(IntObj,features=c("Gap43"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1D
+Tex15_mainplot<-FeaturePlot(IntObj,features=c("Tex15"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1B
+Gnao1_mainplot<-FeaturePlot(IntObj,features=c("Gnao1"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1B
+Gnai2_mainplot<-FeaturePlot(IntObj,features=c("Gnai2"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+#Figure S1B
+Omp_mainplot<-FeaturePlot(IntObj,features=c("Omp"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/mainplot.pdf", plot = mainplot)
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Ascl1_mainplot.pdf", plot = Ascl1_mainplot)
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Neurod1_mainplot.pdf", plot = Neurod1_mainplot)
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Gap43_mainplot.pdf", plot = Gap43_mainplot )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Tex15_mainplot.pdf", plot = Tex15_mainplot )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Gnao1_mainplot.pdf", plot = Gnao1_mainplot )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Gnai2_mainplot.pdf", plot = Gnai2_mainplot )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Omp_mainplot.pdf", plot = Omp_mainplot )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Dotplot_mainplot.pdf", plot = Dotplot_mainplot )
+
+```
+
+#Subsetting and analysing VSN Lineage
+
+##Subsetting VSN lineage
+```{r}
+
+neuron_sub <- subset(IntObj, idents= c("GBC","INP","iVSN V2R","iVSN V1R","mVSN V2R","mVSN V1R"))
+
+```
+
+##Reclustering and processing VSN Lineage
+```{r}
+
+
+Proc_ns<- FindNeighbors(neuron_sub, reduction = "integrated.cca", dims = 1:30)
+Proc_ns<-FindClusters(Proc_ns, group.singletons = TRUE, resolution = 1,cluster.name = "Neuron Subset Find Clusters")
+Proc_ns<-RunUMAP(Proc_ns, reduction = "integrated.cca", dims = 1:30)
+
+
+
+```
+##Labelling Clusters and Generating Figure 1A B and C
+```{r}
+
+
+##ID Progenitor Cluster
+FeaturePlot(Proc_ns,features=c("Ascl1"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+##ID INP Cluster
+FeaturePlot(Proc_ns,features=c("Neurog1"),keep.scale = "feature",reduction="umap")  +
+  theme(aspect.ratio=1)
+
+##ID iVSN Cluster
+FeaturePlot(Proc_ns,features=c("Gap43"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+##ID Basal VSN Cluster
+FeaturePlot(Proc_ns,features=c("Gnao1"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+##ID Apical VSN Cluster
+FeaturePlot(Proc_ns,features=c("Gnai2"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+
+## Generating labels
+Proc_ns_renamed <-c("17"="GBC",
+                    "14"="INP",
+                    "7"="iVSN V1R",
+                    "10"="iVSN V1R",
+                    "5"="iVSN V1R",
+                    "12"="iVSN V2R",
+                    "9"="iVSN V2R", 
+                    "4"="mVSN V1R",
+                    "0"="mVSN V1R",
+                    "1"="mVSN V1R",
+                    "3"="mVSN V1R",
+                    "16"="mVSN V1R",
+                    "8"="mVSN V2R",
+                    "2"="mVSN V2R",
+                    "13"="mVSN V2R",
+                    "6"="mVSN V2R",
+                    "11"="mVSN V2R",
+                    "15"="mVSN V2R")
+
+## Adding the cluster names to Seurat Object
+Proc_ns <-RenameIdents(Proc_ns,Proc_ns_renamed )
+
+
+#Figure 1B
+Tex15_procns<-FeaturePlot(Proc_ns,features=c("Tex15"),keep.scale = "feature",reduction="umap") +
+  scale_colour_gradientn(colours = brewer.pal(9,"Reds")) +
+  theme(aspect.ratio=1)
+Tex15_procns
+
+#Figure 1A
+mainplot_procns<-DimPlot(
+  Proc_ns,
+  reduction = "umap", label= TRUE,
+  group.by = NULL) +
+  theme(aspect.ratio=1)+scale_colour_manual(values = c("seagreen1","seagreen3","lightgoldenrod2","deepskyblue","dodgerblue2","goldenrod2"))
+mainplot_procns
+
+#Figure 1C
+Dotplot_Procns<-DotPlot(Proc_ns, features = c("Omp","Gnai2","Gnao1","Gap43","Tex15","Neurod1","Ascl1"), col.min = 0) +
+  theme(aspect.ratio=1)+coord_flip()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+Dotplot_Procns
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Tex15_procns.pdf", plot = Tex15_procns)
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/mainplot_procns.pdf", plot = mainplot_procns )
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/Dotplot_Procns.pdf", plot = Dotplot_Procns )
+
+```
+
+#Generate VSN Lineage Pseudo time and processing the Data
+```{r, eval=FALSE}
+
+#Generating Pseudotime Data
+join_Proc_ns <- JoinLayers(Proc_ns)
+cds <- SeuratWrappers::as.cell_data_set(join_Proc_ns)
+cds <- cluster_cells(cds, reduction_method = "UMAP", resolution = 1)
+cds <- cds %>% learn_graph(use_partition = FALSE) 
+cds <- order_cells(cds)
+plot_cells(cds, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = FALSE)
+plot_cells(cds, show_trajectory_graph = FALSE, color_cells_by = "partition")
+
+
+#Saving the Data
+saveRDS(cds, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cds_data")
+
+```
+
+##Generating Figure 1D
+```{r}
+
+#Reading Data
+cds_data<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cds_data")
+
+
+#Generating Figure 1D
+cluster_pseudotime<-plot_cells(cds_data, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = FALSE) +
+  theme(aspect.ratio=1)
+
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/pseudotime_cluster.pdf", plot = cluster_pseudotime )
+
+```
+
+#Isolating and processing Basal VSN Lineage
+```{r}
+#Subsetting Basal Lineage
+V2R_Subset <- subset(Proc_ns, idents = c("GBC","INP","iVSN V2R","mVSN V2R"))
+
+#Reclustering Basal Lineage
+V2R_Subsetproc<- FindNeighbors(V2R_Subset, reduction = "integrated.cca", dims = 1:30)
+V2R_Subsetproc<-FindClusters(V2R_Subset, group.singletons = TRUE, resolution = 1,cluster.name = "Neuron Subset Find Clusters")
+V2R_Subsetproc<-RunUMAP(V2R_Subset, reduction = "integrated.cca", dims = 1:30)
+
+```
+
+##Generating Pseudotime Values for Basal Lineage
+
+```{r, eval=FALSE}
+
+
+join_V2R_Subsetproc <- JoinLayers(V2R_Subsetproc)
+normalized_counts_V2R_Proc_ns <- LayerData(join_V2R_Subsetproc, assay = "RNA", layer = "data")
+cdsV2R <- SeuratWrappers::as.cell_data_set(join_V2R_Subsetproc)
+cdsV2R <- cluster_cells(cdsV2R, reduction_method = "UMAP", resolution = 1)
+cdsV2R <- cdsV2R %>% learn_graph(use_partition = FALSE) 
+cdsV2R <- order_cells(cdsV2R)
+plot_cells(cdsV2R, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = FALSE)
+plot_cells(cdsV2R, show_trajectory_graph = FALSE, color_cells_by = "partition")
+
+
+saveRDS(cdsV2R, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cdsV2R_data")
+saveRDS(normalized_counts_V2R_Proc_ns, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/normalized_counts_V2R_Proc_ns")
+
+```
+##Generating Figure 1H
+
+```{r}
+
+#Merging Pseudotime table and Normalised Count Table
+
+cdsV2R_data<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cdsV2R_data")
+normalized_counts_V2R_Proc_ns<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/normalized_counts_V2R_Proc_ns")
+clusterV2R_pseudotime<-plot_cells(cdsV2R_data, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = TRUE)
+cdsV2R_pseudotime<-pseudotime(cdsV2R_data, reduction_method = "UMAP")
+cdsV2R_pseudotime_dataframe <- as.data.frame(cdsV2R_pseudotime)
+worked_cdsV2R_pseudotime_dataframe<-rownames_to_column(cdsV2R_pseudotime_dataframe, var = "Cell_ID")
+df_normalized_counts_V2R_Proc_ns <-as.data.frame(t(normalized_counts_V2R_Proc_ns))
+worked_df_normalised_counts_V2R_Proc_ns<-rownames_to_column(df_normalized_counts_V2R_Proc_ns, var = "Cell_ID")
+full_cds_V2R_normcount_df<- worked_cdsV2R_pseudotime_dataframe %>% inner_join(worked_df_normalised_counts_V2R_Proc_ns, by= c("Cell_ID"))
+
+
+#Filtering Main Table for V2R and Tex15 Expression
+Vmn2rabd_cds_V2R_norm<- full_cds_V2R_normcount_df %>% select(Cell_ID,cdsV2R_pseudotime,Tex15, starts_with("Vmn2r")) %>% select(-Vmn2r1,-Vmn2r2,-Vmn2r3,-Vmn2r4,-Vmn2r5,-Vmn2r6,-Vmn2r7)
+Vmn2rc_cds_V2R_norm<- full_cds_V2R_normcount_df %>% select(Cell_ID,cdsV2R_pseudotime,Vmn2r1,Vmn2r2,Vmn2r3,Vmn2r4,Vmn2r5,Vmn2r6,Vmn2r7)
+Vmn2rmax_c_cds_V2R_norm<-Vmn2rc_cds_V2R_norm %>% rowwise() %>% mutate("V2Rc_max" = max(c_across("Vmn2r1":"Vmn2r7"))) %>% select(Cell_ID,cdsV2R_pseudotime,V2Rc_max)
+Vmn2rmax_abd_cds_V2R_norm<-Vmn2rabd_cds_V2R_norm %>% rowwise() %>% mutate("V2Rabd_max" = max(c_across("Vmn2r84":"Vmn2r-ps52"))) %>% select(Cell_ID,cdsV2R_pseudotime,Tex15,V2Rabd_max) %>% arrange(cdsV2R_pseudotime)
+Vmn2rmax_abd_c_cds_V2R_norm<- inner_join(Vmn2rmax_abd_cds_V2R_norm,Vmn2rmax_c_cds_V2R_norm, by=c("Cell_ID","cdsV2R_pseudotime"))
+worked_Vmn2rmax_abd_c_cds_V2R_norm<- Vmn2rmax_abd_c_cds_V2R_norm %>% pivot_longer(c(Tex15,V2Rabd_max,V2Rc_max))
+
+#Figure 2F
+V2R_Time_markers <- full_cds_V2R_normcount_df %>% select(Cell_ID,cdsV2R_pseudotime, Tex15,Neurod1,Gap43,Omp) %>% arrange(cdsV2R_pseudotime)
+V2R_worked_Time_markers <- V2R_Time_markers %>% pivot_longer(cols = c(Tex15, Neurod1,Gap43,Omp))
+
+pseudotime_graph_V2R_Time <- ggplot(V2R_worked_Time_markers, aes(x=cdsV2R_pseudotime, y=value, colour = name))+ 
+  scale_colour_manual(values = c("firebrick4","seagreen1","dodgerblue4","seagreen3"))+
+  labs(y= "Normalised Gene Expression", x= "Pseudotime Value") +
+  geom_smooth(linewidth=1, method = "loess", span= .05) + theme_bw() 
+pseudotime_graph_V2R_Time
+
+#Figure 2H
+pseudotime_graph_max_norm_V2R <- ggplot(worked_Vmn2rmax_abd_c_cds_V2R_norm, aes(x=cdsV2R_pseudotime, y=value, colour = name)) +
+  geom_smooth(size=1, method = "loess", span= .05)+ 
+  labs(y= "Gene Expression", x= "Pseudotime Value")+
+  labs(title = "Pseudotime of V2R Expression and Tex15 Expression")+
+  labs(colour = "Gene")+ scale_colour_manual(labels= c("Tex15", "V2R ABD Family", "V2R C Family"),values = c("seagreen3","red","blue"))+theme_bw()
+pseudotime_graph_max_norm_V2R
+
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/pseudotime_graph_V2R_Time.pdf", plot = pseudotime_graph_V2R_Time)
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Singe_Cell_Figures/pseudotime_graph_max_norm_V2R.pdf", plot = pseudotime_graph_max_norm_V2R)
+
+```
+
+#Isolating and processing Apical VSN Lineage
+```{r}
+
+V1R_Subset <- subset(Proc_ns, idents = c("GBC","INP","iVSN V1R","mVSN V1R"))
+
+V1R_Subsetproc<- FindNeighbors(V1R_Subset, reduction = "integrated.cca", dims = 1:30)
+V1R_Subsetproc<-FindClusters(V1R_Subset, group.singletons = TRUE, resolution = 1,cluster.name = "Neuron Subset Find Clusters")
+V1R_Subsetproc<-RunUMAP(V1R_Subset, reduction = "integrated.cca", dims = 1:30)
+
+```
+
+##Generating Apical Pseudotime values and pulling Counts
+```{r, eval=FALSE}
+
+
+join_V1R_Subsetproc <- JoinLayers(V1R_Subsetproc)
+normalized_counts_V1R_Proc_ns <- LayerData(join_V1R_Subsetproc, assay = "RNA", layer = "data")
+cdsV1R <- SeuratWrappers::as.cell_data_set(join_V1R_Subsetproc)
+rm(join_V1R_Subsetproc)
+gc()
+cdsV1R <- cluster_cells(cdsV1R, reduction_method = "UMAP", resolution = 1)
+cdsV1R <- cdsV1R %>% learn_graph(use_partition = FALSE) 
+cdsV1R <- order_cells(cdsV1R)
+plot_cells(cdsV1R, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = FALSE)
+plot_cells(cdsV1R, show_trajectory_graph = FALSE, color_cells_by = "partition")
+
+
+saveRDS(cdsV1R, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cdsV1R_data")
+saveRDS(normalized_counts_V1R_Proc_ns, file= "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/normalized_counts_V1R_Proc_ns")
+
+
+```
+
+##Generating Figure 1E and 1G
+```{r}
+
+#Merging Pseudotime table and Normalised Count Table
+
+cdsV1R_data<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/cdsV1R_data")
+normalized_counts_V1R_Proc_ns<-readRDS("/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/normalized_counts_V1R_Proc_ns")
+
+clusterV1R_pseudotime<-plot_cells(cdsV1R_data, color_cells_by = "pseudotime", cell_size = 1,show_trajectory_graph = FALSE)
+cdsV1R_pseudotime<-pseudotime(cdsV1R_data, reduction_method = "UMAP")
+cdsV1R_pseudotime_dataframe <- as.data.frame(cdsV1R_pseudotime)
+worked_cdsV1R_pseudotime_dataframe<-rownames_to_column(cdsV1R_pseudotime_dataframe, var = "Cell_ID")
+df_normalized_counts_V1R_Proc_ns <-as.data.frame(t(normalized_counts_V1R_Proc_ns))
+worked_df_normalised_counts_V1R_Proc_ns<-rownames_to_column(df_normalized_counts_V1R_Proc_ns, var = "Cell_ID")
+full_cds_V1R_normcount_df<- worked_cdsV1R_pseudotime_dataframe %>% inner_join(worked_df_normalised_counts_V1R_Proc_ns, by= c("Cell_ID"))
+
+#Filtering V1R and Tex15 Expression and arranging by pseudotime
+
+Vmn1r_cds_V1R_norm <- full_cds_V1R_normcount_df %>% select(Cell_ID,cdsV1R_pseudotime,Tex15,starts_with("Vmn1r")) %>% arrange(cdsV1R_pseudotime)
+
+Vmn1rmax_cds_V1R_norm <- Vmn1r_cds_V1R_norm %>% rowwise() %>% mutate("V1R_max" = max(c_across("Vmn1r1":"Vmn1r-ps45"))) %>% select(Cell_ID,cdsV1R_pseudotime,Tex15,V1R_max)
+worked_Vmn1rmax_cds_V1R_norm<- Vmn1rmax_cds_V1R_norm %>%pivot_longer(c(Tex15,V1R_max))
+
+#Generating Figure 1E
+Time_markers_V1R <- full_cds_V1R_normcount_df %>% select(Cell_ID,cdsV1R_pseudotime, Tex15,Neurod1,Gap43,Omp) %>% arrange(cdsV1R_pseudotime)
+worked_Time_markers_V1R <- Time_markers_V1R %>% pivot_longer(cols = c(Tex15, Neurod1,Gap43,Omp))
+
+pseudotime_graph_V1R_Time <- ggplot(worked_Time_markers_V1R, aes(x=cdsV1R_pseudotime, y=value, colour = name))+ 
+  scale_colour_manual(values = c("firebrick4","seagreen1","dodgerblue4","seagreen3"))+
+  labs(y= "Normalised Gene Expression", x= "Pseudotime Value") +
+  geom_smooth(linewidth=1, method = "loess", span= .05) + theme_bw() 
+pseudotime_graph_V1R_Time
+
+
+#Figure 1G
+pseudotime_graph_max_norm_V1R <- ggplot(worked_Vmn1rmax_cds_V1R_norm, aes(x=cdsV1R_pseudotime, y=value, colour = name)) +
+  geom_smooth(size=1, method = "loess", span= .05)+ 
+  labs(y= "Gene Expression", x= "Pseudotime Value")+
+  labs(title = "Pseudotime of V1R Expression and Tex15 Expression")+
+  labs(colour = "Gene")+ scale_colour_manual(labels= c("Tex15", "V1R Receptor"), values=c("seagreen3","firebrick4","dodgerblue4"))+ theme_bw()
+pseudotime_graph_max_norm_V1R
+
+```
