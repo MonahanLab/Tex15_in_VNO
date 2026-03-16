@@ -1,0 +1,37 @@
+Name,Subject,Sex,Slide,Section,Genotype,Condition,Image_Number,Total_Nuclei,Mitral_Neg_Nuclei,Mitral_Positive_Cells,Percent_Positive_Mitral,Exp_Group
+2025-10-7 D1WT#5 Section 2.lif - 2025-10-7 D1WT#5 Section 2.tif,D1WT,F,5,2,WT,Dirty,1,243,159,84,0.3457,Control Dirty
+2025-10-7.lif - C1WT#3 Section 2 Merge 40X.png,C1WT,F,3,2,WT,Clean,2,447,326,121,0.2707,Control Clean
+2025-10-8 C1WT#3.lif - 2025-10-8 C1WT#3 Section 3.tif,C1WT,F,3,3,WT,Clean,3,331,240,91,0.2749,Control Clean
+2025-10-8 C1WT#3.lif - 2025-10-8 C1WT#3 Section 1.tif,C1WT,F,3,1,WT,Clean,4,526,440,86,0.1635,Control Clean
+2025-10-8 C2WT#5 Section 2_Merged.tif,C2WT,F,5,2,WT,Clean,5,425,349,76,0.1788,Control Clean
+2025-10-8 D0KO#6.lif - 2025-10-8 D0KO#6 Section 1.tif,D0KO,M,6,1,KO ,Dirty,6,552,463,89,0.1612,Experimental Dirty
+2025-10-8 D0KO#6.lif - 2025-10-8 D0KO#6 Section 2.tif,D0KO,M,6,2,KO ,Dirty,7,507,418,89,0.1755,Experimental Dirty
+2025-10-8 D0KO#7.lif - 2025-10-8 D0KO#7 Section 2 merged.png,D0KO,M,7,2,KO ,Dirty,8,395,339,56,0.1418,Experimental Dirty
+2025-10-8 D3KO#4.lif - 2025-10-8 D3KO#4. section 2.tif,D3KO,F,4,2,KO ,Dirty,9,431,365,66,0.1531,Experimental Dirty
+2025-10-8 D2WT#5.lif - 2025-10-8 D2WT#5 Section 1_Merged.tif,D2WT,F,5,1,WT,Dirty,10,613,424,189,0.3083,Control Dirty
+2025-10-8 D3KO#4.lif - 2025-10-8 D3KO#4 section 1.tif,D3KO,F,4,1,KO ,Dirty,11,291,240,51,0.1753,Experimental Dirty
+2025-10-9 7044#4.lif - 2025-10-9 7044#4 Section 3_Merged.tif,7044,F,4,3,KO ,Clean,12,364,304,60,0.1648,Experimental Clean
+2025-10-8 D2KO#4.lif - 2025-10-8 D2KO#4 Section 2 merged.tif,D2KO,F,4,2,KO ,Dirty,13,610,510,100,0.1639,Experimental Dirty
+2025-10-30 7044#2.lif - Section 3 (2)_Merged.tif,7044,F,2,3,KO ,Clean,14,440,371,69,0.1568,Experimental Clean
+2025-10-8 7039#6.lif - 2025-10-8 7039#6 Section 2_Merged.tif,7039,M,5,2,KO ,Clean,15,667,585,82,0.1229,Experimental Clean
+2025-10-8 7039#6.lif - 2025-10-8 7039#6 Section 3_Merged.tif,7039,M,5,3,KO ,Clean,16,571,507,64,0.1121,Experimental Clean
+2025-10-8 7039#6.lif - 2025-10-8 7039#6 Section 1_merged.tif,7039,M,5,1,KO ,Clean,17,456,368,88,0.1930,Experimental Clean
+2025-10-10 7044#3.lif - Section 3_Merged.tif,7044,F,3,3,KO ,Clean,18,415,349,66,0.1590,Experimental Clean
+2025-10-10 C2WT#4.lif - Section 2_Merged.tif,C2WT,F,4,2,WT,Clean,19,379,311,68,0.1794,Control Clean
+C3-2025-10-10 D1#3.lif - Section 2_Merged.tif,D1WT,F,3,2,WT,Dirty,20,442,341,101,0.2285,Control Dirty
+2025-10-8 D2WT#5.lif - 2025-10-8 D2WT#5 Section 3_Merged.tif,D2WT,F,5,3,WT,Dirty,21,462,287,175,0.3788,Control Dirty
+2025-10-8 D2WT#5.lif - 2025-10-8 D2WT#5 Section 2_Merged.tif,D2WT,F,5,2,WT,Dirty,22,557,352,205,0.3680,Control Dirty
+2025-10-8 D2KO#4.lif - 2025-10-8 D2KO#4 Section 3 merged.tif,D2KO,F,4,3,KO ,Dirty,23,434,329,105,0.2419,Experimental Dirty
+2025-10-8 D2KO#4.lif - 2025-10-8 D2KO#4 Section 1 merged.tif,D2KO,F,4,1,KO ,Dirty,24,696,586,110,0.1580,Experimental Dirty
+2025-10-16  C2#7.lif - Section 1_Merged.tif,C2WT,F,7,1,WT,Clean,25,519,362,157,0.3025,Control Clean
+2025-10-16 7154#4.lif - Section 1 Merged.tif,7154,M,4,1,KO ,Clean,26,664,549,115,0.1732,Experimental Clean
+2025-10-16 7154#5.lif - Section 1_Merged.tif,7154,M,5,1,KO ,Clean,27,816,648,168,0.2059,Experimental Clean
+2025-10-16 7154#5.lif - Section 2_Merged.tif,7154,M,5,2,KO ,Clean,28,357,269,88,0.2465,Experimental Clean
+2025-10-16 D1#1.lif - Section 2_Merged.tif,D1WT,F,1,2,WT,Dirty,29,214,150,64,0.2991,Control Dirty
+2025-10-16 D3KO#5.lif - Section 1_Merged.tif,D3KO,F,5,1,KO ,Dirty,30,338,232,106,0.3136,Experimental Dirty
+C2-2025-10-21 D3WT#5.lif - Section 1_Merged.tif,D3WT,M,5,1,WT,Dirty,31,352,235,117,0.3324,Control Dirty
+2025-10-21 D3WT#5.lif - Section 3_Merged.tif,D3WT,M,5,3,WT,Dirty,32,315,205,110,0.3492,Control Dirty
+2025-10-21 D3WT#5.lif - Section 2_Merged.tif,D3WT,M,5,2,WT,Dirty,33,483,341,142,0.2940,Control Dirty
+2025-10-21 C4WT#8.lif - Section 1 (2)_Merged.tif,C4WT,M,8,1,WT,Clean,34,342,292,50,0.1462,Control Clean
+2025-10-21 C4WT#8.lif - Section 2_Merged.tif,C4WT,M,8,2,WT,Clean,35,371,310,61,0.1644,Control Clean
+2025-10-21 C4WT#5.lif - Section 3_Merged.tif,C4WT,M,5,3,WT,Clean,36,412,350,62,0.1505,Control Clean
