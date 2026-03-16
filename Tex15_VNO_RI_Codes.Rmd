@@ -1,0 +1,118 @@
+---
+title: "Tex15_VNO_RI_Codes"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggtext)
+library(forcats)
+library("rcompanion")
+library("pwr")
+library(rstatix)
+library(ggpubr)
+library("gridExtra")
+library("carData")
+library("car")
+library("factoextra")
+library("corrplot")
+```
+
+#Generating the Table for Analysis
+```{r}
+
+#Reading and merging tables
+Sanja_Table<- read_delim(file="/media/storage3/nader/RI_Analysis/Worked RI - Copy of Resident Intruder Sanjana.csv",delim=",",col_names = TRUE)
+Melina_Table <-read_delim(file="/media/storage3/nader/RI_Analysis/Worked RI - Copy of Resident Intruder Melina.csv",delim=",",col_names = TRUE)
+
+Analysis_Table <- inner_join(Sanja_Table,Melina_Table, by= c("Resident_Male","Genotype","Trials_List"), suffix = c("_San","_Mel"))
+
+#adds the expriment/control groups
+worked_Analysis_Table<-Analysis_Table %>% mutate(Exp_check = c(Genotype=="KO")) %>% mutate(Exp_Group= if_else(Exp_check == TRUE,true = "Experimental",false = "Control")) 
+
+#finds average between 2 scorers
+worked_Analysis_Table$Avg_attack_latency <- rowMeans(Analysis_Table[c("Attack_Latency_Mel","Attack_Latency_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Anogenital <- rowMeans(Analysis_Table[c("Ano-genital_Sniffing_Mel","Ano-genital_Sniffing_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_socialexpo <- rowMeans(Analysis_Table[c("Social_Exploration_Mel","Social_Exploration_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Rest_Inactivity <- rowMeans(Analysis_Table[c("Rest/Inactivity_Mel","Rest/Inactivity_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Non_social_explore <- rowMeans(Analysis_Table[c("Non_social_explore_Mel","Non_social_explore_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Clinch_Attack <-rowMeans(Analysis_Table[c("Clinch_Attack_Mel","Clinch_Attack_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Move_Toward <-rowMeans(Analysis_Table[c("Move_Toward_Mel","Move_Toward_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Keep_Down <-rowMeans(Analysis_Table[c("Keep_Down_Mel","Keep_Down_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Lateral_Threat <-rowMeans(Analysis_Table[c("Lateral_Threat_Mel","Lateral_Threat_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Chase <-rowMeans(Analysis_Table[c("Chase_Mel","Chase_San")], na.rm = TRUE )
+worked_Analysis_Table$Avg_Rearing <-rowMeans(Analysis_Table[c("Rearing_Mel","Rearing_San")], na.rm = TRUE )
+
+#calculates SD of attack latency
+worked_Analysis_Table1<- worked_Analysis_Table  %>% group_by(Exp_Group, Trials_List )  %>%summarise( "Avg_attack_latency_SD" = sd(Avg_attack_latency,na.rm = FALSE))%>% ungroup()
+
+#changes attack latencies of 0 to 600
+worked_Analysis_Table2<- worked_Analysis_Table %>% mutate(Avg_attack_latency= dplyr::case_when(Avg_attack_latency == 0 ~ 600, TRUE ~ Avg_attack_latency))
+
+#Find the mean attack latency by resident
+worked_Analysis_Table3<- worked_Analysis_Table2 %>% group_by(Exp_Group, Trials_List) %>%mutate("Avg_attack_latency_byTrial"= mean(Avg_attack_latency))
+
+#adds the SD to the main table
+worked_Analysis_Table4 <- inner_join(worked_Analysis_Table2, worked_Analysis_Table1, by= c("Exp_Group","Trials_List"))
+
+#adds the mean attack latency to the main table
+worked_Analysis_Table6 <- inner_join(worked_Analysis_Table4,worked_Analysis_Table3)
+
+
+```
+
+
+#Generating Figure 5B
+```{r}
+
+#isolating the columns for the fight table
+Fight_table <- worked_Analysis_Table6  %>% select(Resident_Male, Genotype,Exp_Group, Trials_List,Avg_attack_latency)
+
+#getting rid of duplicates
+Fight_table1 <- Fight_table  %>% group_by(Resident_Male)%>%mutate("Min_attack_latency"= min(Avg_attack_latency)) %>% ungroup()
+
+#Added binary column for Figure 2C
+Fight_table5 <- Fight_table1 %>% mutate("Attacked_Intruder" = if_else(Min_attack_latency == 600,true = "did not attack",false = "attacked"))
+
+#Figure 2C
+Fight_plot2 <- Fight_table5 %>% ggplot()+aes(x=Exp_Group, fill = factor(Attacked_Intruder))+ 
+  geom_bar(position = "fill", width = 0.3) + 
+  ggtitle("Ratio of Residents which Attacked during the Trials")+
+  labs(fill= "Attack Indicator")+ 
+  theme_bw()+
+  scale_fill_discrete(labels= c("Attacked","Did Not Attack"))+ 
+  ylab("Percent of Residents ")+guides(fill = guide_legend(reverse = TRUE))
+Fight_plot2
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Resident_Intruder_Figures/Fight_plot2.pdf", plot = Fight_plot2, width= 7, height = 7  )
+
+```
+
+#Generating Figure 5C
+```{r}
+
+
+Buttsniff1<-worked_Analysis_Table6  %>% select(Resident_Male,Genotype,Trials_List, Avg_Anogenital ,Exp_Group)
+
+t.test(Avg_Anogenital~Exp_Group, data = Buttsniff1)
+
+buttsniff_plot1 <- Buttsniff1  %>% ggplot()+
+  theme_bw()+
+  geom_boxplot(aes(x=Exp_Group, y = Avg_Anogenital),width = 0.2, outlier.shape = TRUE)+
+  geom_point( aes(x= Exp_Group, y = Avg_Anogenital ),width=0.1, position= position_dodge(width = .2))+
+  coord_cartesian(ylim = c(0,250)) + 
+  ggtitle("Comparing Anogenital Sniffing Between Experimental and Control Groups") + 
+  xlab("Mouse Group")+
+  ylab("Seconds spent Anogenital Sniffing")+ 
+  scale_x_discrete(labels=c("Control", "Experimental", "Trial 3"))+
+  labs(fill= "Mouse Group")
+buttsniff_plot1
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Resident_Intruder_Figures/Anogenital_plot.pdf", plot = buttsniff_plot1, width= 7, height = 7  )
+
+
+```
