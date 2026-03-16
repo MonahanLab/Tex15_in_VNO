@@ -1,0 +1,654 @@
+---
+title: "Tex15_VNO_BulkRNAseq_Codes"
+output: html_document
+---
+
+# setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,comment = '', fig.width = 10, fig.height = 10)
+```
+
+```{r LoadPackages, message=FALSE}
+library(biomaRt)
+library(tidyverse)
+library(plyranges)
+library("rtracklayer")
+library(ChIPQC)
+library(Rsubread)
+library(DESeq2)
+library(ggrastr)
+library(ggbreak)
+library("RColorBrewer")
+library(edgeR)
+library(circlize) # circos plots and colors for complexheatmap
+library(randomcoloR)
+library(ComplexHeatmap)
+library(patchwork)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(biomaRt)
+library(tidyverse)
+library(plyranges)
+library("rtracklayer")
+library(ChIPQC)
+library(Rsubread)
+library(DESeq2)
+library(ggrastr)
+library(ggbreak)
+library("RColorBrewer")
+library(edgeR)
+library(circlize)
+library(randomcoloR)
+library(ComplexHeatmap)
+library(patchwork)
+library(naniar)
+library(neonUtilities)
+library(fgsea)
+library(rstatix)
+library(ggpubr)
+library(vegan)
+```
+# Universal set up
+```{r functions}
+gr_to_bed <- function(gr){
+gr %>% as_tibble() %>% dplyr::select(seqnames,start,end,name,score,strand)  
+}
+format_GRanges_for_featureCounts <- function(GRanges_intervals){
+GRanges_intervals  %>% as_tibble() %>% dplyr::select("GeneID" = name,Chr=seqnames,Start=start,End=end,Strand=strand)
+}
+Get_GRanges_overlap <- function(Reference,Query,FieldName){
+output <- bind_rows(data.frame(Reference[Reference %over% Query]) %>% mutate( !!FieldName := TRUE),data.frame(Reference[!(Reference %over% Query)]) %>% mutate( !!FieldName := FALSE)) %>% arrange(seqnames,start) %>% GRanges()
+return(output)
+}
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+    stopifnot(!missing(x))
+    stopifnot(!missing(filename))
+    pdf(filename, width=width, height=height)
+    grid::grid.newpage()
+    grid::grid.draw(x$gtable)
+    dev.off()
+}
+```
+
+```{r GenomeAnnotation}
+included_contigs <- c(1:19,"X","Y")
+contig_levels <- str_c("chr",c(1:19,"X","Y"))
+blklist <- import.bed("/seq/mm10/mm10-blacklist.v3.bed")
+
+
+```
+
+```{r GeneAnnotation}
+gene_table <- read_delim(file="/media/storage2/kevin/paper_Tex15/annotation/ENSEMBL_plus_Barnes_with_Pcdh_constant_gene_reference.txt",delim="\t",col_names = TRUE)
+
+# gene sets
+ORs <- read_delim(file="/media/storage2/kevin/paper_Tex15/annotation/OR_annotation.txt",delim="\t",col_names = TRUE) %>% distinct() %>% dplyr::rename(cluster_name = name) %>% mutate(seqnames = factor(seqnames,levels=contig_levels)) %>% droplevels()
+TypeI_ORs <- ORs %>% filter(class == "ClassI")
+TypeII_ORs <-  ORs %>% filter(class == "ClassII") 
+
+# gene sets
+Olfr <- gene_table %>% semi_join(ORs) %>% mutate(receptor_class = "Olfr")
+Olfr_I <- gene_table %>% semi_join(TypeI_ORs) %>% mutate(receptor_class = "Olfr_ClassI")
+Olfr_II <- gene_table %>% semi_join(TypeII_ORs) %>% mutate(receptor_class = "Olfr_ClassII")
+Taar <- gene_table %>% filter(grepl("Taar",gene_name)) %>% mutate(receptor_class = "Taar")
+Vmn1r <- gene_table %>% filter(grepl("Vmn1",gene_name))  %>% mutate(receptor_class = "Vmn1r")
+Vmn2r <- gene_table %>% filter(grepl("Vmn2",gene_name))  %>% mutate(receptor_class = "Vmn2r")
+Fpr <- gene_table %>% filter(grepl("Fpr",gene_name)) %>% mutate(receptor_class = "Fpr")
+ReceptorGenes <- bind_rows(list(Olfr_I,Olfr_II,Taar,Vmn1r,Vmn2r,Fpr))
+NonReceptorGenes <-  gene_table %>% anti_join(ReceptorGenes)
+ReceptorGenes_withNon <- NonReceptorGenes %>% mutate(receptor_class = "non_GPCR") %>% bind_rows(ReceptorGenes)
+
+cPcdh <- gene_table %>% filter(grepl("Pcdha",gene_name) | grepl("Pcdhb",gene_name) | grepl("Pcdhg",gene_name) )
+```
+
+# Load Data
+
+## VNO_Tex15
+```{r}
+# Load Data
+
+## VNO Tex15 Data
+VNO_Tex15_libraries.all <- read_delim(file="/media/storage3/nader/Tex15_VNO_Nov25_Libraries/VNO_Libraries_Sheet8.csv",delim=",",col_names = TRUE) %>% 
+  mutate(across(c(Library,SampleName,Group,fastq_folder),factor)) %>% 
+  mutate(Exp_check = c(Group=="VNO.Tex15KO"))%>%
+  mutate(Exp_Group= if_else(Exp_check == TRUE,true = "Experimental",false = "Control")) %>%
+  select(-Exp_check)
+
+  
+```
+
+### Library QC
+```{r figwidth = 10, message=FALSE,warning=FALSE,fig.width=8,fig.height=8}
+### Library QC
+p.VNO_Tex15_raw_reads <- ggplot(VNO_Tex15_libraries.all)+
+	geom_bar(aes(x=SampleName,y=(raw_pairs/1000000),fill=Group),stat = "identity")+
+	geom_hline(yintercept=20,linetype=2,color="black")+
+	scale_y_continuous(expand = c(0, 0))+
+	theme_bw()+
+	theme(aspect.ratio=2,legend.position = "none",text = element_text(size=18),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+	labs(y="Raw read pairs (million)",x="",title="Sequencing depth")+
+	coord_cartesian(ylim=c(0,140))
+ggsave(p.VNO_Tex15_raw_reads,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/p.VNO_Tex15_raw_reads.pdf")
+p.VNO_Tex15_raw_reads
+
+p.VNO_Tex15_percent_unique <- ggplot(VNO_Tex15_libraries.all)+
+	geom_bar(aes(x=SampleName,y=(percent_unique),fill=Group),stat = "identity")+
+	scale_y_continuous(expand = c(0, 0))+
+	theme_bw()+
+	theme(aspect.ratio=2,legend.position = "none",text = element_text(size=18),axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+	labs(y="Percent unique",x="",title="percent uniquely aligned")+
+	coord_cartesian(ylim=c(0,100))
+ggsave(p.VNO_Tex15_percent_unique,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/p.VNO_Tex15_percent_unique.pdf")
+p.VNO_Tex15_percent_unique
+```
+
+
+### filter out low qualitry or overly shallow libraries
+```{r message=FALSE, warning=FALSE}
+### filter out low qualitry or overly shallow libraries
+VNO_Tex15_libraries <- VNO_Tex15_libraries.all %>% mutate(bam_file_name=bamFile_all,bampath = bam_all_path) %>% filter(!grepl("fail",QC)) %>% filter(!grepl("poor",QC)) # select single end data
+VNO_Tex15_metaData <- VNO_Tex15_libraries %>% dplyr::select(row_names=bam_file_name,Group,Exp_Group,Library,SampleName,bam_file=bam_file_name,fastq_folder) %>% column_to_rownames(var = "row_names") 
+VNO_Tex15_bamsToCount <- VNO_Tex15_libraries %>%  pull(bampath)
+```
+
+```{r countReads}
+# count reads
+VNO_Tex15_counts  <- featureCounts(files=file.path(VNO_Tex15_bamsToCount),annot.ext="/media/working/seq/mm10/annotation/Monahan_Lab_gene_annotation_mm10_2025-02/Monahan_Lab_gene_annotation_mm10_2025-02.gtf" ,isPairedEnd=TRUE,isGTFAnnotationFile=TRUE,GTF.featureType="exon",GTF.attrType="gene_id",nthreads=12,strandSpecific=0,useMetaFeatures = TRUE)
+saveRDS(VNO_Tex15_counts,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_counts.rData")
+```
+
+
+```{r runDESeq2}
+
+VNO_Tex15_metaData<- VNO_Tex15_metaData %>% mutate(Exp_Group = ifelse(Group== "VNO.Tex15Het_Admera","Control","Experimental"))
+
+VNO_Tex15_dds <- DESeqDataSetFromMatrix(countData = VNO_Tex15_counts$counts, colData = VNO_Tex15_metaData, design = ~  Exp_Group)
+mcols(VNO_Tex15_dds) <- data.frame(basepairs = VNO_Tex15_counts$annotation$Length)
+VNO_Tex15_dds <- VNO_Tex15_dds[ rowMeans(counts(VNO_Tex15_dds)) > 1,  ] # filter to remove low expressed genes
+VNO_Tex15_dds$Group <- relevel(VNO_Tex15_dds$Group, ref = "VNO.Tex15Het_Admera")
+VNO_Tex15_dds <- DESeq(VNO_Tex15_dds) # perform differential expression analysis
+saveRDS(VNO_Tex15_dds,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_dds.rData")
+```
+
+```{r}
+VNO_Tex15_counts <- readRDS(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_counts.rData")
+VNO_Tex15_dds <- readRDS(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_dds.rData")
+```
+
+
+
+
+### Sample comparison and generating Figure 2B
+```{r}
+VNO_Tex15_vsd <- vst(VNO_Tex15_dds, blind=FALSE)
+VNO_Tex15_rld <- rlog(VNO_Tex15_dds, blind=FALSE)
+head(assay(VNO_Tex15_vsd), 3)
+
+VNO_Tex15_sampleDists <- dist(t(assay(VNO_Tex15_vsd)))
+VNO_Tex15_sampleDistMatrix <- as.matrix(VNO_Tex15_sampleDists)
+rownames(VNO_Tex15_sampleDistMatrix) <- paste(VNO_Tex15_vsd$Group, VNO_Tex15_vsd$type, sep="-")
+colnames(VNO_Tex15_sampleDistMatrix) <- NULL
+VNO_Tex15_colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(VNO_Tex15_sampleDistMatrix,
+         clustering_distance_rows=VNO_Tex15_sampleDists,
+         clustering_distance_cols=VNO_Tex15_sampleDists,
+         col=VNO_Tex15_colors)
+
+
+#Generating figure 2B
+VNO_Tex15_pcaData <- plotPCA(VNO_Tex15_vsd, intgroup=c("Group"), returnData=TRUE)
+VNO_Tex15_percentVar <- round(100 * attr(VNO_Tex15_pcaData, "percentVar"))
+PCA_plot<-ggplot(VNO_Tex15_pcaData, aes(PC1, PC2, color=Group)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",VNO_Tex15_percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",VNO_Tex15_percentVar[2],"% variance")) + 
+  labs(labels= "Experimental Group", values= c("Control","Experimental"))+
+  coord_fixed()+theme_bw()
+
+ggsave(PCA_plot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/PCA_plot.pdf",height=7,width=7)
+```
+
+### Generate counts from DEseq2
+```{r get_gene_included_gene_names}
+VNO_Tex15_fpkm <- fpkm(VNO_Tex15_dds, robust = FALSE) %>% as.data.frame() %>% rownames_to_column(var="gene_id") %>% pivot_longer(cols=c(-gene_id),values_to="fpkm",names_to="bam_file") %>% left_join(VNO_Tex15_metaData)
+VNO_Tex15_included_genes <- VNO_Tex15_fpkm %>% pull(gene_id) 
+```
+
+```{r calculateTPMs}
+# calculate TPMs by ENSEMBL id
+VNO_Tex15_tpm <- VNO_Tex15_fpkm %>% group_by(Library) %>% mutate(total_fpkm = sum(fpkm)) %>% mutate(tpm = (fpkm / total_fpkm) *1000000) %>% dplyr::select(gene_id,Library,Group,tpm) %>% ungroup()
+
+
+VNO_Tex15_tpm.table <- VNO_Tex15_tpm %>% dplyr::select(gene_id,Library,tpm) %>% pivot_wider(names_from="Library",values_from="tpm") %>% left_join(gene_table)
+VNO_Tex15_tpm.mean <- VNO_Tex15_tpm %>% group_by(Group,gene_id) %>% summarize(mean_tpm = mean(tpm)) %>% arrange(gene_id) %>% ungroup()
+VNO_Tex15_tpm.mean.table <- VNO_Tex15_tpm.mean %>% pivot_wider(values_from=mean_tpm,names_from=Group) %>% left_join(gene_table)
+
+worked_ReceptorGenes<-ReceptorGenes%>% select(gene_id, receptor_class)
+
+
+worked_VNO_Tex15_tpm<- left_join(VNO_Tex15_tpm.table, worked_ReceptorGenes, suffix = c(".x",".y"))
+
+ write_delim(worked_VNO_Tex15_tpm, file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_tpm_full_11-25.csv",delim=",")
+
+```
+
+
+### Results
+```{r}
+### Results
+experiment_name <- c("rna_VNO_Tex15KO-vs-Control")
+Groups <- tibble(Group = c("Control","Experimental"))
+selected_contrast <- c("Exp_Group", "Experimental","Control")
+significance_threshold <- 0.05 
+
+VNO_Tex15_res <- results(VNO_Tex15_dds, alpha=significance_threshold, contrast= selected_contrast)
+VNO_Tex15_results <- VNO_Tex15_res %>% as.data.frame() %>% rownames_to_column(var="gene_id") %>% mutate(significant = ifelse((padj< significance_threshold),"TRUE","FALSE")) %>% replace_na(list(significant = "FALSE"))  %>% mutate(direction = ifelse(log2FoldChange < 0, "down","up")) %>% left_join(gene_table)
+
+write_delim(VNO_Tex15_results,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_results_11-25.csv",delim=",")
+
+ReceptorGenes %>% inner_join(VNO_Tex15_results) %>% write_delim(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_results_Receptors_11-25.csv",delim=",")
+```
+
+#DESeq2 results table
+```{r}
+#DESeq2 results table
+VNO_Tex15KO_res <- results(VNO_Tex15_dds, alpha=significance_threshold, contrast= c("Exp_Group", "Experimental","Control"))
+VNO_Tex15KO_results <- VNO_Tex15KO_res %>% as.data.frame() %>%
+  rownames_to_column(var="gene_id") %>%
+  mutate(significant = ifelse((padj< significance_threshold),"TRUE","FALSE")) %>%
+  replace_na(list(significant = "FALSE"))  %>%
+  mutate(direction = ifelse(log2FoldChange < 0, "down","up"),probability = padj) %>%
+  mutate(set=ifelse(significant==TRUE,direction,"NS"),probability=padj) %>%
+  left_join(gene_table)
+write_delim(VNO_Tex15KO_results ,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15KO_results.csv",delim=",")
+
+```
+
+
+#DESeq2 results table, lfcThreshold = 1.5
+```{r}
+#DESeq2 results table, lfcThreshold = 1.5
+VNO_Tex15KO_res_lfc_Threshold <- results(VNO_Tex15_dds, alpha=significance_threshold, contrast= c("Exp_Group", "Experimental","Control"),lfcThreshold = log2(1.5))
+VNO_Tex15KO_results_lfc_Threshold <- VNO_Tex15KO_res_lfc_Threshold %>% as.data.frame() %>%
+  rownames_to_column(var="gene_id") %>%
+  mutate(significant = ifelse((padj< significance_threshold),"TRUE","FALSE")) %>%
+  replace_na(list(significant = "FALSE"))  %>%
+  mutate(direction = ifelse(log2FoldChange < 0, "down","up"),probability = padj) %>%
+  mutate(set=ifelse(significant==TRUE,direction,"NS"),probability=padj) %>%
+  left_join(gene_table)
+write_delim(VNO_Tex15KO_results_lfc_Threshold ,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15KO_results_lfc_Threshold.csv",delim=",")
+
+```
+
+
+```{r}
+resultsNames(VNO_Tex15_dds)
+selected_contrast = "Exp_Group_Experimental_vs_Control"
+
+VNO_Tex15_resShrink <- lfcShrink(VNO_Tex15_dds, coef=selected_contrast, type="ashr") 
+VNO_Tex15_resultsShrink <- VNO_Tex15_resShrink %>% as.data.frame() %>% rownames_to_column(var="gene_id") %>% mutate(significant = ifelse((padj< significance_threshold),"TRUE","FALSE")) %>% replace_na(list(significant = "FALSE"))  %>% mutate(direction = ifelse(log2FoldChange < 0, "down","up")) %>% left_join(gene_table)
+write_delim(VNO_Tex15_resultsShrink,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_resultsShrink_11-25.csv",delim=",")
+
+
+```
+
+#Generate tables for change up or change down
+```{r}
+#Generate tables for change up or change down
+VNO_Tex15_DEG_Up <- VNO_Tex15_results  %>% filter(padj < 0.05) %>% filter(log2FoldChange > 0)
+VNO_Tex15_DEG_Down <- VNO_Tex15_results  %>% filter(padj < 0.05) %>% filter(log2FoldChange < 0)
+```
+
+
+#Generating the main TPM table from DEseq2 and other information
+```{r}
+#Generating the main TPM table from DEseq2 and other information
+
+##Reads the TPM Table
+tpmtable<- read.delim(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_tpm_full_11-25.csv", sep = ",")
+##Create Control Mean
+tpmtable$Hetmean <- rowMeans(tpmtable[c("rna.VNO.Tex15HET.6416.41825","rna.VNO.Tex15HET.6349.42525","rna.VNO.Tex15HET.7135.101725","rna.VNO.Tex15HET.7137.101725")], na.rm = TRUE)
+##Create Experimental Means
+tpmtable$KOmean<- rowMeans(tpmtable[c("rna.VNO.Tex15KO.7136.101725","rna.VNO.Tex15KO.7131.101725","rna.VNO.Tex15KO.7132.101725","rna.VNO.Tex15KO.7134.102125")], na.rm = TRUE)
+## Creating TPM delta between control and experimental
+tpmtable$TPM_Delta <- tpmtable$Hetmean- tpmtable$KOmean
+
+##adding statistics to the table
+stat_Table<-read.delim(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/VNO_Tex15_resultsShrink_11-25.csv", sep = ",")
+
+Part1_Complete_Table<- inner_join(tpmtable,stat_Table)
+
+##pulling V2R annotations
+V2R_complete_Family<-read_delim(file="/media/storage3/nader/Tex15_VNO_KO_tpm/V2Rs groups by Family - V1 Sheet.csv",delim=",",col_names = TRUE)
+Vmn2r_annotation <-read_delim(file="/media/storage2/kevin/paper_Tex15/annotation/Vmn2r_annotation.csv",delim=",",col_names = TRUE)
+Vmn2r_annotation_modded <- Vmn2r_annotation %>% select(-V2R_Family)
+Complete_Vmn2r_annotation<- left_join(Vmn2r_annotation_modded,V2R_complete_Family, by= c("gene_name"))
+
+##pulling V1R annotations
+Vmn1r_cluster_annotation<-read_delim(file="/media/storage2/kevin/paper_Tex15/annotation/Vmn1r_annotation.csv", delim=",",col_names = TRUE)
+###Standardising V1R cluster names
+SingchromV1R<- Vmn1r_cluster_annotation %>% filter(nchar(seqnames)==4)
+SingchromV1R.2<-SingchromV1R %>% mutate("cluster_name"= substr(SingchromV1R$cluster_name, start = 6, stop = 20))
+duochromV1R<- Vmn1r_cluster_annotation %>% filter(nchar(seqnames)==5)
+duochromV1R.2<-duochromV1R%>% mutate("cluster_name"= substr(duochromV1R$cluster_name, start = 7, stop = 20))
+Vmn1r_cluster_annotation_final<- full_join(duochromV1R.2,SingchromV1R.2)
+
+Vmn1r_subfamilies<-read_delim(file="/media/storage3/nader/Tex15_VNO_KO_tpm/V1R_Subfamilies.csv", delim=",",col_names = TRUE)
+Vmn1r_annotation <- left_join(Vmn1r_cluster_annotation_final, Vmn1r_subfamilies, by= c("gene_name", "gene_biotype"))
+
+##merging V1R and V2R cluster annotations
+Vr_cluster_annotation <- full_join( Vmn1r_cluster_annotation_final,Complete_Vmn2r_annotation)
+
+
+##Generating final table for processing
+One_Table_trta<- left_join(Part1_Complete_Table,Vr_cluster_annotation, by= c("gene_id","gene_name","gene_biotype"))
+
+write_delim(One_Table_trta,file =  "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/One_Table_trta_Final.csv",append = FALSE, delim = ",")
+
+```
+
+
+<font size="5"> *Generating filter tables from non pivoted TPM tables*
+
+```{r}
+#Generating Filter Tables
+
+One_Table_trta<- read.delim(file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/One_Table_trta_Final.csv", sep = ",")
+
+##Fpr Table
+FPR_table<-One_Table_trta %>% filter(receptor_class== "Fpr")
+
+##C family V2Rs
+V2R_CFam_list <-One_Table_trta %>% filter(cluster_name== "Vmn2r_cluster_2")
+
+##A, B, and D family V2Rs
+V2R_NCFam_list<-One_Table_trta %>% filter(receptor_class== "Vmn2r") %>% anti_join(V2R_CFam_list) 
+
+##V1Rs
+V1R_list<-One_Table_trta %>% filter(receptor_class== "Vmn1r")
+
+
+```
+
+
+#Generating the geom jitter of the VR clusters for Figure S2A and B
+```{r}
+
+#Generating the geom jitter of the VR clusters for Figure S2A and B
+
+
+##pulling the cluster names of the V2Rs and replacing NA values with "Unknown"
+V2Rclusternames<-  V2R_NCFam_list %>% select(cluster_name) %>% distinct(cluster_name) %>% mutate("cluster_name"= ifelse(is.na(cluster_name),"Unknown",cluster_name))%>%arrange(cluster_name)%>% pull(1)  
+
+##Factoring the names of the V2R clusters
+V2R_NCFam_list$cluster_name<-factor(V2R_NCFam_list$cluster_name, levels = V2Rclusternames , labels=c("Vmn2r_cluster_8", "Vmn2r_cluster_9","Vmn2r_cluster_10", "Vmn2r_cluster_11", "Vmn2r_cluster_12", "Vmn2r_cluster_13", "Vmn2r_cluster_14", "Vmn2r_cluster_15", "Vmn2r_cluster_19", "Vmn2r_cluster_20", "Vmn2r_cluster_22", "Vmn2r_cluster_24","Vmn2r_cluster_25", "Vmn2r_cluster_26", "Vmn2r_cluster_30", "Vmn2r_cluster_31","Vmn2r_cluster_39", "Vmn2r_cluster_40", "Vmn2r_cluster_42", "Vmn2r_cluster_44", "Vmn2r_cluster_45","Vmn2r_cluster_46","Unknown")) 
+
+##S2B
+V2R_NCFam_list_boxplot<- V2R_NCFam_list %>% ggplot()+
+  theme_bw()+
+  geom_jitter( aes(x= cluster_name, y = log2FoldChange, colour= significant),alpha=.5, width = .1)+ 
+  ggtitle("Log2fold Change in A, B, and D Family V2R Clusters") + 
+  xlab("Cluster")+
+  scale_x_discrete(labels=c("Cluster 8","Cluster 9","Cluster 10","Cluster 11","Cluster 12","Cluster 13","Cluster 14","Cluster 15", "Cluster 19","Cluster 20","Cluster 22","Cluster 24","Cluster 25","Cluster 26","Cluster 30","Cluster 31","Cluster 39","Cluster 40","Cluster 42"," Cluster 44","Cluster 45","Cluster 46","Unknown"))+
+  labs(fill= "Gene")+
+  ylab("Log2fold Change")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ theme(aspect.ratio = 1)
+V2R_NCFam_list_boxplot
+
+##S2A
+V1R_listboxplot<- V1R_list  %>% arrange(cluster_name) %>% ggplot()+
+  theme_bw()+
+  geom_jitter( aes(x= cluster_name, y = log2FoldChange, colour= significant),alpha=.5, width = .1)+ 
+  ggtitle("Log2fold Change in V1R Clusters") + 
+  xlab("Cluster")+ 
+  scale_x_discrete(labels= c("Cluster 1","Cluster 2","Cluster 3","Cluster 4","Cluster 5","Cluster 6","Cluster 7"))+
+  labs(fill= "Gene")+
+  ylab("Log2fold Change")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ theme(aspect.ratio = 2)
+V1R_listboxplot
+
+ggsave(V2R_NCFam_list_boxplot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V2R_NCFam_list_boxplot.pdf",height=7,width=7)
+ggsave(V1R_listboxplot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V1R_listboxplot.pdf",height=7,width=7)
+
+```
+
+##Generating Figure 2C
+```{r}
+
+Trusig_table <-  One_Table_trta %>% replace_na(list(receptor_class = "non_receptor")) %>% filter(receptor_class== "Vmn1r"|receptor_class== "Vmn2r"|receptor_class== "Fpr"|receptor_class== "non_receptor") %>%  group_by(receptor_class,direction, significant) %>% summarise(count=n()) %>% ungroup()%>% group_by(direction, significant) %>% mutate("Percentage"=(count/sum(count))*100)
+
+Trusig_column_up<- Trusig_table%>%filter(significant== TRUE)%>% filter(direction=="up") %>% ggplot(aes(x=direction, y= Percentage, fill = receptor_class))+geom_col()+ theme_bw()+theme(aspect.ratio = 2)+
+  scale_fill_manual(values=c("Fpr"="royalblue","non_receptor"="springgreen2","Vmn1r"="goldenrod1","Vmn2r"="darkorchid2"))+ coord_polar("y",start=0)+theme_void()
+Trusig_column_up
+
+Trusig_column_down<- Trusig_table%>%filter(significant== TRUE)%>% filter(direction=="down") %>% ggplot(aes(x=direction, y= Percentage, fill = receptor_class))+geom_col()+ theme_bw()+theme(aspect.ratio = 2)+
+  scale_fill_manual(values=c("Fpr"="royalblue","non_receptor"="springgreen2","Vmn1r"="goldenrod1","Vmn2r"="darkorchid2"))+ coord_polar("y",start=0)+theme_void()
+Trusig_column_down
+
+Falsesig_table <-  One_Table_trta %>% replace_na(list(receptor_class = "non_receptor")) %>% filter(receptor_class== "Vmn1r"|receptor_class== "Vmn2r"|receptor_class== "Fpr"|receptor_class== "non_receptor") %>% filter(significant==FALSE) %>%  group_by(receptor_class, significant) %>% summarise(count=n()) %>% ungroup()%>% mutate("Percentage"=(count/sum(count))*100)
+
+Faslesig_column<- Falsesig_table %>% ggplot(aes(x=significant, y= Percentage, fill = receptor_class))+geom_col()+  coord_polar("y",start=0) +theme_bw()+theme(aspect.ratio = 2)+
+  scale_fill_manual(values=c("Fpr"="royalblue","non_receptor"="springgreen2","Vmn1r"="goldenrod1","Vmn2r"="darkorchid2"))+theme_void()
+Faslesig_column
+
+
+
+ggsave(Trusig_column_up,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/piechart_sigup.pdf",height=7,width=7)
+ggsave(Trusig_column_down,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/piechart_sigdown.pdf",height=7,width=7)
+ggsave(Faslesig_column,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/piechart_ns.pdf",height=7,width=7)
+
+
+```
+#Generating Tables for Figure S2E S2F S2A
+```{r}
+
+
+
+##generating base table
+Box_worked_One_Table_trta<-One_Table_trta %>% dplyr::select(-KOmean,-Hetmean)  %>% pivot_longer(cols = c(rna.VNO.Tex15HET.6416.41825,rna.VNO.Tex15HET.7135.101725,rna.VNO.Tex15KO.7136.101725, rna.VNO.Tex15HET.7137.101725,rna.VNO.Tex15KO.7131.101725,rna.VNO.Tex15KO.7134.102125,rna.VNO.Tex15KO.7132.101725,rna.VNO.Tex15HET.6349.42525))%>% mutate("Exp_Group"=ifelse(grepl("HET",name),"Control","Experimental"))
+
+###Generating H2-MV table
+worked_H2MV_list_box<- Box_worked_One_Table_trta %>% filter(is.na(receptor_class)) %>% filter(grepl("H2-M",gene_name)) 
+
+###Generating Vmn2r81 table
+worked_vmn2r81_list <-Box_worked_One_Table_trta %>% filter(receptor_class== "Vmn2r")  %>% filter(grepl("Vmn2r81",gene_name))
+
+###Generating Vmn2r82 table
+worked_vmn2r82_list <-Box_worked_One_Table_trta %>% filter(receptor_class== "Vmn2r")  %>% filter(grepl("Vmn2r82",gene_name))
+
+###Generating Joined Vmn2r81 and Vmn2r82 table
+worked_vmn2r8182_list <-full_join(worked_vmn2r82_list,worked_vmn2r81_list)
+
+##Generating Figure 2F
+vmn2r8182_boxplot<- worked_vmn2r8182_list  %>% ggplot()+
+  theme_bw()+
+  geom_boxplot(aes(x= gene_name, y = value, fill= Exp_Group),width = 0.4, outlier.shape = NA)+
+  geom_point( aes(x= gene_name, y = value, fill= Exp_Group),width=0.05, position= position_dodge(width = .4))+ 
+  ggtitle("TPM Comparison between Control and Knockout") + 
+  xlab("Gene")+
+  labs(fill= "Experimental Group")+
+  ylab("Transcripts Per Million (TPM)")+ theme(aspect.ratio = 1)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  coord_cartesian(ylim=c(0,50)) 
+vmn2r8182_boxplot
+
+##Generating Figure 2G
+H2mv_boxplot<- worked_H2MV_list_box%>%  filter(significant==TRUE)%>% ggplot()+
+  theme_bw()+
+  geom_boxplot(aes(x= gene_name, y = value, fill= Exp_Group),width = 1, outlier.shape = NA)+
+  geom_jitter( aes(x= gene_name, y = value, fill= Exp_Group), position= position_dodge(width = 1))+ 
+  ggtitle("TPM Comparison between Control and Knockout") + 
+  xlab("Gene")+
+  labs(fill= "Experimental Group")+
+  ylab("Transcripts Per Million (TPM)")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ theme(aspect.ratio = 1)+
+  coord_cartesian(ylim=c(0,70)) 
+H2mv_boxplot
+
+
+#Total tpm table made
+worked_VR_list_box<- Box_worked_One_Table_trta %>%filter(receptor_class== "Vmn1r"|receptor_class== "Vmn2r")
+
+sum_worked_VR_list_box_notsig <-worked_VR_list_box %>% group_by(name,receptor_class)%>% mutate(sumtpm= sum(value)) %>% distinct(name,Exp_Group,sumtpm)%>% arrange(Exp_Group)
+t.test(sumtpm~Exp_Group, data=sum_worked_VR_list_box_notsig)
+sum_worked_VR_list_box_notsig
+
+#Figure S2A
+worked_VR_sum_comparison_box <- sum_worked_VR_list_box_notsig %>%
+  ggplot()+
+  theme_bw()+
+  geom_boxplot(aes(x= receptor_class, y = sumtpm, fill = Exp_Group),width = 0.4, outlier.shape = NA)+
+  geom_point( aes(x= receptor_class, y = sumtpm, fill = Exp_Group),width=0.05, position= position_dodge(width = .4))+coord_cartesian(ylim=c(0,2000))+ theme(aspect.ratio = 1)
+worked_VR_sum_comparison_box
+
+
+ggsave(worked_VR_sum_comparison_box,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/sum_tpm_boxplot.pdf",height=7,width=7)
+ggsave(H2mv_boxplot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/H2mv_boxplot.pdf",height=7,width=7)
+ggsave(vmn2r8182_boxplot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/vmn2r8182_boxplot.pdf",height=7,width=7)
+
+```
+
+#Generating Line plots for Figure 2D 2E 2F S2B
+```{r}
+
+
+##figure 2D
+V1R_list_Line <- V1R_list %>% mutate(set = ifelse(significant == TRUE,direction,"NS")) %>% ggplot() + aes(log10(Hetmean+1),log10(KOmean+1), fill = set, colour = set) +geom_point(size=2, shape= 23)+geom_abline(yintercept=0,color="orange")+
+  ggtitle("V1R Family Expression")+ 
+  coord_fixed(ratio = 1)+ 
+  coord_cartesian(xlim= c(0,3), ylim=c(0,3))+
+  coord_fixed(ratio = 1, xlim = c(0,3),ylim = c(0,3))+
+  labs(fill= "Transcription Change")+ 
+  theme_bw() + 
+  xlab("Log 10 Control Mean")+
+  ylab("Log 10 Knockout Mean")+
+  #scale_colour_manual(values = c("indianred4","springgreen4"))+
+  scale_fill_manual(values=c("NS"="black","up"="blue","down"="red"))+
+  scale_colour_manual(values=c("NS"="black","up"="blue","down"="red"))
+V1R_list_Line
+
+##figure 2E
+V2R_NCfam_Line <- V2R_NCFam_list%>% mutate(set = ifelse(significant == TRUE,direction,"NS")) %>% ggplot() + aes(log10(Hetmean+1),log10(KOmean+1), fill = set, colour = set) +geom_point(size=2, shape= 23)+geom_abline(yintercept=0,color="orange")+
+  ggtitle("V2R ABD Family Expression")+ 
+  coord_fixed(ratio = 1)+ 
+  coord_cartesian(xlim= c(0,3), ylim=c(0,3))+
+  coord_fixed(ratio = 1, xlim = c(0,3),ylim = c(0,3))+
+  labs(fill= "Transcription Change")+ 
+  theme_bw() + 
+  xlab("Log 10 Control Mean")+
+  ylab("Log 10 Knockout Mean")+
+  #scale_colour_manual(values = c("indianred4","springgreen4"))+
+  scale_fill_manual(values=c("NS"="black","up"="blue","down"="red"))+
+  scale_colour_manual(values=c("NS"="black","up"="blue","down"="red"))
+V2R_NCfam_Line
+
+##Figure 2F
+V2R_Cfam_Line <- V2R_CFam_list%>% mutate(set = ifelse(significant == TRUE,direction,"NS")) %>% ggplot() + aes(log10(Hetmean+1),log10(KOmean+1), fill = set, colour = set) +geom_point(size=2, shape= 23)+geom_abline(yintercept=0,color="orange")+ ggtitle("V2R C Family Expression")+ coord_fixed(ratio = 1)+ coord_cartesian(xlim= c(0,3), ylim=c(0,3))+coord_fixed(ratio = 1, xlim = c(0,3),ylim = c(0,3))+labs(fill= "Transcription Change")+ theme_bw() + 
+  xlab("Log 10 Control Mean")+
+  ylab("Log 10 Knockout Mean")+
+  scale_fill_manual(values=c("NS"="black","up"="blue","down"="red"))+
+  scale_colour_manual(values=c("NS"="black","up"="blue","down"="red"))
+V2R_Cfam_Line 
+
+##Figure S2B
+Fpr_Line <- FPR_table %>% mutate(set = ifelse(significant == TRUE,direction,"NS")) %>% ggplot() + aes(log10(Hetmean+1),log10(KOmean+1), fill = set, colour = set) +geom_point(size=2, shape= 23)+geom_abline(yintercept=0,color="orange")+ ggtitle("Fpr Expression")+ coord_fixed(ratio = 1)+ coord_cartesian(xlim= c(0,1), ylim=c(0,1))+coord_fixed(ratio = 1, xlim = c(0,1),ylim = c(0,1))+labs(fill= "Transcription Change")+ theme_bw() + 
+  xlab("Log 10 Control Mean")+
+  ylab("Log 10 Knockout Mean")+
+  scale_fill_manual(values=c("NS"="black","up"="blue","down"="red"))+
+  scale_colour_manual(values=c("NS"="black","up"="blue","down"="red"))
+Fpr_Line
+
+ggsave(V1R_list_Line ,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V1R_list_Line.pdf", width= 7.2917, height=4.4861)
+ggsave(V2R_Cfam_Line,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V2R_Cfam_line.pdf", width= 7.2917, height=4.4861)
+ggsave(V2R_NCfam_Line ,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V2R_NCfam_Line.pdf", width= 7.2917, height=4.4861)
+ggsave(Fpr_Line,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/Fpr_Line.pdf", width= 7.2917, height=4.4861)
+
+```
+
+#Ratio ranking Figure 2G 2H
+```{r}
+
+worked_One_Table_trta<-One_Table_trta %>% dplyr::select(-rna.VNO.Tex15HET.6416.41825
+,-rna.VNO.Tex15HET.6349.42525
+,-rna.VNO.Tex15HET.7135.101725
+,-rna.VNO.Tex15KO.7136.101725
+, -rna.VNO.Tex15HET.7137.101725
+, -rna.VNO.Tex15KO.7131.101725, -rna.VNO.Tex15KO.7134.102125,
+-rna.VNO.Tex15KO.7132.101725	)  %>% pivot_longer(cols = c(-gene_id,-gene_name,-gene_biotype,-receptor_class,-TPM_Delta,-baseMean,-log2FoldChange,-lfcSE,-pvalue,-padj,-significant,-direction,-seqnames,-start,-end,-width,-strand,-score,-cluster_name,-V2R_Family,-V2R_Type))
+
+worked_V2R_CFam_list <- worked_One_Table_trta %>% filter(cluster_name== "Vmn2r_cluster_2")
+
+worked_V2R_NCFam_list <-worked_One_Table_trta %>% filter(receptor_class== "Vmn2r") %>% anti_join(worked_V2R_CFam_list)
+
+worked_V1R_list<-worked_One_Table_trta %>% filter(receptor_class== "Vmn1r")
+
+V1R_receptor_rank <- worked_V1R_list %>% mutate(name = factor(name,levels=c("Hetmean","KOmean"))) %>% dplyr::select(name,value) %>% 
+    group_by(name) %>% arrange(name,-value) %>%
+    mutate(rank = row_number()) %>% mutate("Percentage"=(value/sum(value)))%>%
+  arrange(-Percentage) %>% 
+  mutate(cumulative_fraction=cumsum(Percentage)) %>%
+  ungroup()%>% arrange(name, rank)
+
+V1R_receptor_rank_graph<-V1R_receptor_rank %>% 
+  ggplot()+geom_line(aes(x=rank,y=cumulative_fraction,group=name,color=name))+
+  scale_y_continuous(labels = scales::percent) + 
+  theme_classic()+
+	labs(y="Cumulative Percentage",x="V1R expression Rank",title="V1R Table")+ theme(aspect.ratio = 1)
+V1R_receptor_rank_graph
+
+V2R_receptor_rank <- worked_V2R_NCFam_list %>% mutate(name = factor(name,levels=c("Hetmean","KOmean"))) %>% dplyr::select(name,value) %>% 
+    group_by(name) %>% arrange(name,-value) %>%
+    mutate(rank = row_number()) %>% mutate("Percentage"=(value/sum(value)))%>%
+  arrange(-Percentage) %>% 
+  mutate(cumulative_fraction=cumsum(Percentage)) %>%
+  ungroup()%>% arrange(name, rank)
+   
+V2R_receptor_rank_graph<-V2R_receptor_rank %>% 
+  ggplot()+geom_line(aes(x=rank,y=cumulative_fraction,group=name,color=name))+
+  scale_y_continuous(labels = scales::percent) + 
+  theme_classic()+
+	labs(y="Cumulative Percentage",x="V2R expression Rank",title="V2R Table")+ theme(aspect.ratio = 1)
+V2R_receptor_rank_graph
+
+ggsave(V2R_receptor_rank_graph,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V2R_receptor_rank_graph.pdf")
+ggsave(V1R_receptor_rank_graph,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/V1R_receptor_rank_graph.pdf")
+
+```
+
+#Shannon's Index Diversity Significance Calculation Figure 2I
+```{r}
+
+VR_list<-One_Table_trta %>% filter(receptor_class== "Vmn1r"|receptor_class== "Vmn2r")
+
+divtablenomean <- VR_list%>% select(gene_name, rna.VNO.Tex15HET.6416.41825
+,rna.VNO.Tex15HET.6349.42525
+,rna.VNO.Tex15HET.7135.101725
+, rna.VNO.Tex15HET.7137.101725,rna.VNO.Tex15KO.7136.101725, rna.VNO.Tex15KO.7131.101725, rna.VNO.Tex15KO.7134.102125,
+rna.VNO.Tex15KO.7132.101725)
+
+rownames(divtablenomean) <- divtablenomean$gene_name
+divtablenomean$gene_name <- NULL
+  
+divtablenomeant<-t(divtablenomean)
+
+divnomean<-diversity(divtablenomeant)
+
+divnomean_tibble <- as_tibble(divnomean, rownames = "Sample")%>%
+  mutate("Experimental_Group"=ifelse(grepl("HET",Sample),"Control","Experimental"))%>% 
+  group_by(Experimental_Group)%>% 
+  mutate("Shannon_Index_mean"=mean(value))%>% 
+  rename(value="Shannon_Index")
+divnomean_tibble
+
+result<-t.test(Shannon_Index~Experimental_Group, divnomean_tibble)
+p.value<-result$p.value
+
+p.divnomean_tibble<- divnomean_tibble  %>%
+      mutate(p_value = p.value)
+
+div_plot<- p.divnomean_tibble %>% ggplot(aes(x=Experimental_Group, y=Shannon_Index))+theme_bw()+ geom_dotplot(binaxis = "y",stackdir = "center", binwidth = .01)+ theme(aspect.ratio = 1)+stat_compare_means(aes(x= Experimental_Group, y = Shannon_Index), method = "t.test", label = "p.format", label.y= 5.5, label.x = 1.4)
+div_plot
+
+ggsave(div_plot,file="/media/storage3/nader/Tex15_VNO_Preprint_Code/Bulk_RNAseq_Figures/div_plot.pdf")
+
+write_delim(p.divnomean_tibble,file =  "/media/storage3/nader/Tex15_VNO_Preprint_Code/Generated_files/Shannon Index Table.csv",append = FALSE, delim = ",")
+
+
+```
