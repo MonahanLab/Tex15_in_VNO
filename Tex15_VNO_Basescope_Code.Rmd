@@ -1,0 +1,63 @@
+
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggtext)
+library(forcats)
+library("rcompanion")
+library("pwr")
+library(rstatix)
+library(ggpubr)
+library(afex)
+library(emmeans)
+library(performance)
+
+```
+#Analysis and Processing of Data
+```{r}
+
+#Reading Table
+Basescope1.5<- read_delim(file="/media/storage3/nader/Basescope Analysis/BaseScope_Translation_Key.csv",delim=",",col_names = TRUE)
+
+
+Basescope3.5 <- Basescope1.5 %>% mutate("cSubject"= as.character(Subject))%>%
+  group_by(cSubject, Red_Probe)%>%
+  mutate("Average_Percent_Red"= (mean(Percent_Red)*100))%>% 
+  mutate("Exp_group"= ifelse(Genotype=="KO","Tex15KO","Control")) %>%
+  mutate("sd_red_expression"= sd(Percent_Red*100))%>%
+  mutate("SEM_by_VR"= sd_red_expression/sqrt(length(cSubject)))%>%
+  select(cSubject, Exp_group, VRs, Red_Probe, Percent_Red, Average_Percent_Red,sd_red_expression,SEM_by_VR) %>% 
+  filter(Red_Probe == "1r202")%>% arrange(Exp_group) %>% ungroup()%>%
+  mutate(cSubject = factor(cSubject,c( "6756", "6757","6759","7473","6755","6758","6761","7472","7474")))
+
+#filtered tables for each probe
+Basescope3.5_V1R202 <- Basescope3.5 %>% filter(Red_Probe=="1r202")%>% group_by(cSubject, Exp_group)%>% summarise(Avg_Percent_Red= mean(Percent_Red))%>% arrange(Exp_group)
+t.test(Avg_Percent_Red~Exp_group, data = Basescope3.5_V1R202)
+
+
+#Figure 3A
+v1r202<-Basescope3.5 %>% filter(Red_Probe=="1r202")%>%ggplot(aes(x=Exp_group,y=Average_Percent_Red,fill = cSubject, colour = Exp_group))+ 
+  geom_pointrange(aes(ymin = (Average_Percent_Red - SEM_by_VR), ymax = (Average_Percent_Red + SEM_by_VR)),position = position_dodge(width = 0.5))+theme_bw()+
+  ggtitle("Percent of VSNs expressing Vmn1r202") + 
+  xlab("Experimental Group")+
+  ylab("Percent Expressing Vmn1r202")+theme(aspect.ratio=1)
+v1r202
+
+
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Basescope_figures/Vmn1r202_plot.pdf", plot = v1r202)
+
+#statistics for the table
+bs_data <- read_delim(file="/media/storage3/nader/Basescope Analysis/BaseScope_Translation_Key.csv",delim=",",col_names = TRUE)
+bs_data$SubjectFact <- as.factor(bs_data$Subject)
+
+vmn1r202_mod <- mixed(Percent_Red~Genotype + (1|SubjectFact), 
+                      data = filter(bs_data, Red_Probe=='1r202'))
+vmn1r202_mod
+check_normality(vmn1r202_mod$full_model)
+
+
+```
