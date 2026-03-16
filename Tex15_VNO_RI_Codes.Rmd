@@ -114,5 +114,29 @@ buttsniff_plot1
 
 ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Resident_Intruder_Figures/Anogenital_plot.pdf", plot = buttsniff_plot1, width= 7, height = 7  )
 
+```
 
+#statistical analysis of data
+```{r}
+
+ri_data<-worked_Analysis_Table6
+
+ri_attackers <- ri_data %>% group_by(Resident_Male, Exp_Group) %>% 
+  summarise(Avg_attack_latency_m = mean(Avg_attack_latency)) %>% 
+  mutate(attacker=ifelse(Avg_attack_latency_m==600, FALSE,TRUE))
+
+ri_attackers %>% ungroup %>% select(Exp_Group, attacker) %>% table()
+
+ri_attackers %>% ungroup %>% select(Exp_Group, attacker) %>% table() %>%  fisher.test()
+
+ri_data$Avg_Anogenital_sniffing <- (ri_data$`Ano-genital_Sniffing_Mel` + ri_data$`Ano-genital_Sniffing_San`)/2
+ri_data$Trial <- factor(ri_data$Trials_List, ordered=T, 
+                        levels=c("Day_1_Trial","Day_2_Trial","Day_3_Trial"))
+ags_mod <- mixed(Avg_Anogenital_sniffing~Exp_Group+Trial +(1|Resident_Male), data=ri_data)
+ags_mod
+check_normality(ags_mod$full_model)
+ags_geno_means <- emmeans(ags_mod$full_model, pairwise~Exp_Group)
+test(ags_geno_means)
+ags_trial_trend <- emmeans(ags_mod$full_model, poly~Trial)
+test(ags_trial_trend)
 ```
