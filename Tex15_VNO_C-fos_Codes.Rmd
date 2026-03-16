@@ -1,0 +1,69 @@
+---
+title: "Tex15_VNO_C-fos_Codes"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggtext)
+library(forcats)
+library("rcompanion")
+library("pwr")
+library("rcompanion")
+library("pwr")
+library(rstatix)
+library(ggpubr)
+library(afex)
+library(emmeans)
+```
+#Read and Process Table and Generating Figure 4B
+```{r}
+
+#Read Table 
+cfos1<- read_delim(file="/media/storage3/nader/Cfos_Analysis/Cfos/Cfos_Translation_Key -Translation_Key.csv",delim=",",col_names = TRUE)
+
+#Process averages by subject
+cfos2 <- cfos1  %>% mutate("Percent_Positive"= as.numeric(Percent_Positive_Mitral)) %>% select(-Percent_Positive_Mitral)
+cfos3 <- cfos2  %>% group_by(Subject) %>% mutate("Average_Percent_Expression"= mean(Percent_Positive)) %>% arrange(Image_Number) 
+
+#T test by condition with same genotype
+cfos_KO_distinct<- cfos3 %>% filter(Genotype!= "WT") %>% distinct(Average_Percent_Expression,Subject, Condition)
+cfos_WT_distinct<- cfos3 %>% filter(Genotype== "WT") %>% distinct(Average_Percent_Expression,Subject, Condition)
+
+t.test(Average_Percent_Expression~Condition, data = cfos_WT_distinct)
+t.test(Average_Percent_Expression~Condition, data = cfos_KO_distinct)
+
+#Figure 4B
+Genotype_plot_dot_Su<- cfos3%>% mutate(Genotype = factor(Genotype,levels=c("WT","KO")))%>%ggplot()+
+  theme_bw()+
+  geom_boxplot(aes(x= Genotype, y = Average_Percent_Expression, fill = Condition),width = 0.4, outlier.shape = TRUE)+
+  geom_point( aes(x= Genotype, y = Average_Percent_Expression, fill = Condition),width=0.05, position= position_dodge(width = .4))+ 
+  coord_cartesian(ylim = c(0,.5)) + 
+  xlab("Genotype")+
+  ylab("Average Percent of Mitral Activation")+
+  theme(aspect.ratio = 1.5)
+Genotype_plot_dot_Su
+
+ggsave(filename = "/media/storage3/nader/Tex15_VNO_Preprint_Code/Cfos_figures/Condition_plot_dot_Su.pdf", plot = Genotype_plot_dot_Su)
+
+
+```
+
+
+#Statistics for the cfos data
+```{r}
+cfos_data <- read_delim(file="/media/storage3/nader/Cfos_Analysis/Cfos/Cfos_Translation_Key -Translation_Key.csv",delim=",",col_names = TRUE)
+cfos_mod <- mixed(Percent_Positive_Mitral~Genotype*Condition + (1|Subject), data = cfos_data)
+cfos_mod
+check_normality(cfos_mod$full_model)
+check_model(cfos_mod$full_model)
+cfos_means <- emmeans(cfos_mod$full_model, pairwise~Condition|Genotype)
+test(cfos_means)
+cfos_means_all <- emmeans(cfos_mod$full_model, pairwise~Condition*Genotype)
+test(cfos_means_all)
+
+```
