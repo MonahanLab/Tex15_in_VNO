@@ -15,3 +15,5 @@ For the Bulk RNAseq, the required files to load into the code are
     VNO_Libraries_Sheet8.csv (This is the file structure we use to pull in the relevant bam and bw files for processing)
     Vmn1r_annotation.csv (cluster annotations for V1Rs)
     Vmn2r_annotation.csv (cluster annotations for V2Rs)
+
+For the SingleCell Code, we have ommitted the necessary Hills Jr. et al data from this repository but the raw data can be found at GSE252365
